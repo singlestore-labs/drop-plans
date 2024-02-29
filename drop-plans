@@ -1,0 +1,177 @@
+#!/usr/bin/python3
+
+import argparse
+import getpass
+import sys
+import mysql.connector
+
+is_dry_run = False
+is_verbose = False
+
+class Node:
+    def __init__(self, node_id, node_addr, node_type):
+        self.node_id   = node_id
+        self.node_addr = node_addr
+        self.node_type = node_type
+        self.plans     = []
+
+    def fetch_plans(self, query_filter=None):
+        like_part = ''
+        if query_filter:
+            like_part = "AND query_text LIKE '%{}%'".format(query_filter)
+        q = '''
+            SELECT plan_id FROM information_schema.mv_plancache
+            WHERE node_id={}
+            {}
+        '''.format(self.node_id, like_part)
+        cursor.execute(q)
+        self.plans = [plan_id[0] for (plan_id) in cursor]
+
+    def drop_plans(self):
+        print("Dropping plans on {} {} ({})... {}".format(
+            self.node_type,
+            self.node_id,
+            self.node_addr,
+            dry_run_tag()))
+        if len(self.plans) == 0:
+            print("    No plans to drop.")
+        else:
+            num_dropped = 0
+            for plan_id in self.plans:
+                self.drop_plan(plan_id)
+                if not is_dry_run:
+                    num_dropped += 1
+            print("    Total plans dropped: {}/{}\n".format(num_dropped, len(self.plans)))
+
+    def drop_plan(self, plan_id):
+        if is_verbose:
+            print("    Dropping plan {}... {}".format(
+                plan_id,
+                '[DRY RUN]' if is_dry_run else  ''))
+        if not is_dry_run:
+            q = "DROP {} FROM PLANCACHE ON NODE {}".format(plan_id, self.node_id)
+            cursor.execute(q)
+
+    def __str__(self):
+        return "id: {}, type: {}, address: {}, plans: {}".format(
+            self.node_id,
+            self.node_addr,
+            self.node_type,
+            len(self.plans))
+
+def dry_run_tag():
+    return ' [DRY RUN]' if is_dry_run else ''
+
+def fetch_nodes(node_type, query_filter=None):
+    q = "SELECT id, ip_addr, type FROM mv_nodes WHERE type='{}'".format(node_type)
+    cursor.execute(q)
+    nodes = [
+        Node(node_id, node_addr, node_type) \
+        for (node_id, node_addr, node_type) in cursor
+    ]
+
+    # Do this separately so we can re-use the cursor.
+    #
+    for node in nodes:
+        node.fetch_plans(query_filter)
+
+    return nodes
+
+def print_nodes(title, nodes, indent_level=0):
+    def indent(level, tab_size=4):
+        return ' ' * level * tab_size
+
+    print("{}{} ({}):".format(indent(indent_level), title, len(nodes)))
+    if len(nodes) == 0:
+        print("{}No nodes found.".format(indent(indent_level+1)))
+    else:
+        for node in nodes:
+            print("{}{}".format(indent(indent_level+1), node))
+    print()
+
+def clear_wasm_cache():
+    q = "SHOW VARIABLES LIKE 'wasm_max_image_cache_size'"
+    cursor.execute(q)
+    old_size = cursor.fetchone()[1]
+
+    q = "SET GLOBAL wasm_max_image_cache_size = 0"
+    cursor.execute(q)
+
+    q = "SET GLOBAL wasm_max_image_cache_size = {}".format(old_size)
+    cursor.execute(q)
+
+parser = argparse.ArgumentParser(
+    description='Drop plans on SingleStoreDB nodes.')
+
+parser.add_argument('-u', '--user', type=str, default="root")
+parser.add_argument('-H', '--host', type=str, default="localhost")
+parser.add_argument('-P', '--port', type=int, default=3306)
+parser.add_argument('-v', '--verbose', action='store_true', default=False)
+parser.add_argument('-d', '--dry-run', action='store_true', default=False)
+parser.add_argument('-w', '--clear-wasm-cache', action='store_true', default=False)
+parser.add_argument('-q', '--query-filter', type=str, default=None)
+parser.add_argument(
+    'where', 
+    metavar='types',
+    nargs='*',
+    choices=['all', 'master', 'child', 'leaf'])
+
+args = parser.parse_args()
+
+is_dry_run = args.dry_run
+is_verbose = args.verbose
+
+pw = getpass.getpass()
+
+on_master = True if 'master' in args.where or 'all' in args.where else False
+on_child  = True if 'child'  in args.where or 'all' in args.where else False
+on_leaf   = True if 'leaf'   in args.where or 'all' in args.where else False
+
+print("User: {}\nHost: {}\nPort: {}".format(args.user, args.host, args.port))
+print("Scope:{}{}{}".format(
+    " master" if on_master else "",
+    " child"  if on_child  else "",
+    " leaf"   if on_leaf   else ""))
+print("Query Filter: {}".format(
+    args.query_filter if args.query_filter else "[none]"))
+
+conn = mysql.connector.connect(
+    user=args.user,
+    password=pw,
+    host=args.host,
+    port=args.port,
+    database="information_schema")
+
+cursor = conn.cursor()
+
+ma_nodes = []
+ca_nodes = []
+lf_nodes = []
+
+print();
+print("Cluster Summary:")
+nodes = []
+if on_master:
+    ma_nodes = fetch_nodes("ma", args.query_filter)
+    print_nodes("Master Aggregator", ma_nodes, 1)
+    nodes += ma_nodes
+if on_child:
+    ca_nodes = fetch_nodes("ca", args.query_filter)
+    print_nodes("Child Aggregators", ca_nodes, 1)
+    nodes += ca_nodes
+if on_leaf:
+    lf_nodes = fetch_nodes("leaf", args.query_filter)
+    print_nodes("Leaves", lf_nodes, 1)
+    nodes += lf_nodes
+
+if args.clear_wasm_cache:
+    if not is_dry_run:
+        clear_wasm_cache()
+    print("Wasm cache cleared{}.\n".format(dry_run_tag()))
+
+for node in nodes:
+    node.drop_plans()
+
+cursor.close()
+conn.close()
+
