@@ -41,17 +41,27 @@ The `--user`, `--host`, and `--port` options specify the target database's usern
 ## Examples
 
 Drop all plans on all nodes:
-`drop-plans --user $DBUSER --host $DBHOST --port $DBPORT all`
+```
+drop-plans --user $DBUSER --host $DBHOST --port $DBPORT all
+```
 
 Drop all plans on leaf nodes:
-`drop-plans --user $DBUSER --host $DBHOST --port $DBPORT leaf`
+```
+drop-plans --user $DBUSER --host $DBHOST --port $DBPORT leaf
+```
 
 Drop all plans on leaf nodes and clear the Wasm cache:
-`drop-plans --user $DBUSER --host $DBHOST --port $DBPORT --clear-wasm-cache leaf`
+```
+drop-plans --user $DBUSER --host $DBHOST --port $DBPORT --clear-wasm-cache leaf
+```
 
 Drop plans whose query text contains the string `my_func` on leaf and child aggregator nodes, but not the master:
-`drop-plans --user $DBUSER --host $DBHOST --port $DBPORT --query-filter my_func leaf child`
+```
+drop-plans --user $DBUSER --host $DBHOST --port $DBPORT --query-filter my_func leaf child
+```
 
 Same as above, but as a dry run only:
-`drop-plans --user $DBUSER --host $DBHOST --port $DBPORT --dry-run --query-filter my_func leaf child`
+```
+drop-plans --user $DBUSER --host $DBHOST --port $DBPORT --dry-run --query-filter my_func leaf child
+```
 
