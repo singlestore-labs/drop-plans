@@ -24,7 +24,7 @@ optional arguments:
   -q QUERY_FILTER, --query-filter QUERY_FILTER
 ```
 
-The `types` argument specifies which kind of node(s) to affect.  Zero or more of the following types may be specified.
+The `types` argument specifies which kind of node(s) to affect.  One or more of the following types may be specified.
 - `master`: drop plans on master aggregator
 - `child`: drop plans on child aggregators
 - `leaf`: drop plans on leaf nodes
